@@ -559,6 +559,7 @@
 				customerIndex: -1,
 				customerKeyword: '',
 				customerSuggests: [],
+				debouncedCustomerSuggest: null,
 
 				deliveryList: [],
 				deliveryIndex1: -1,
@@ -1184,6 +1185,7 @@
 			this.loadVehicles()
 
 			this.debouncedBottleSuggest = debounce(this.doBottleSuggest, 200)
+			this.debouncedCustomerSuggest = debounce(this.fetchCustomerSuggest, 250)
 
 			if (this.isEditing && this.editId) {
 				this.loadSaleForEdit(this.editId)
@@ -1664,23 +1666,21 @@
 
 			// 客户联想输入
 			onCustomerInput(e) {
-				const val = e.detail.value.trim()
+				const val = e.detail.value
 				this.customerKeyword = val
+				const kw = val.trim()
 
-				if (!val) {
+				if (!kw) {
 					this.customerSuggests = []
 					this.header.customer_id = ''
 					this.header.customer_name = ''
 					return
 				}
 
-				const list = (this.customers || []).filter(c => {
-					if (!c || !c.name) return false
-					return c.name.indexOf(val) !== -1
-				})
-
-				this.customerSuggests = list.slice(0, 20)
-				console.log('[sale/edit] customer suggest len:', this.customerSuggests.length)
+				if (!this.debouncedCustomerSuggest) {
+					this.debouncedCustomerSuggest = debounce(this.fetchCustomerSuggest, 250)
+				}
+				this.debouncedCustomerSuggest(kw)
 			},
 
 			onSelectCustomer(item) {
@@ -1881,7 +1881,9 @@
 						data: {
 							action: 'list',
 							token,
-							data: {}
+							data: {
+								pageSize: 500
+							}
 						}
 					})
 					if (this.handleAuthError(res)) return
@@ -1896,6 +1898,50 @@
 					}
 				} catch (e) {
 					console.error('加载客户异常', e)
+				}
+			},
+
+			async fetchCustomerSuggest(keyword) {
+				const kw = (keyword || '').trim()
+				if (!kw) {
+					this.customerSuggests = []
+					return
+				}
+
+				const token = getToken()
+				if (!token) {
+					this.customerSuggests = []
+					ensureLogin()
+					return
+				}
+
+				try {
+					const res = await uniCloud.callFunction({
+						name: 'crm-customer',
+						data: {
+							action: 'suggest',
+							token,
+							data: {
+								keyword: kw,
+								limit: 20
+							}
+						}
+					})
+					if (this.handleAuthError(res)) return
+					if (res.result?.code !== 0) {
+						this.customerSuggests = []
+						return
+					}
+
+					const list = (res.result.data || []).map((c) => {
+						const oid = c && c._id && c._id.$oid ? c._id.$oid : c && c._id
+						return { ...c, _id: oid ? String(oid) : '' }
+					})
+					this.customerSuggests = list
+					console.log('[sale/edit] customer suggest len:', this.customerSuggests.length)
+				} catch (err) {
+					console.error('fetchCustomerSuggest error', err)
+					this.customerSuggests = []
 				}
 			},
 

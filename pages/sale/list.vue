@@ -422,6 +422,7 @@ export default {
       customerIndex: -1,
       customerKeyword: '',
       customerSuggests: [],
+      customerSuggestTimer: null,
 
       // 收款状态筛选
       paymentStatusOptions: ['全部', '已付', '挂账', '部分已付', '冲减'],
@@ -552,19 +553,22 @@ export default {
     },
 
     onCustomerInput(e) {
-      const kw = e.detail.value.trim()
-      this.customerKeyword = kw
+      const kwRaw = e.detail.value
+      this.customerKeyword = kwRaw
+      const kw = kwRaw.trim()
 
       if (!kw) {
         this.customerSuggests = []
         this.filters.customerId = ''
         this.filters.customerName = ''
+        if (this.customerSuggestTimer) clearTimeout(this.customerSuggestTimer)
         return
       }
 
-      this.customerSuggests = this.customers
-        .filter((c) => c && c.name && c.name.includes(kw))
-        .slice(0, 20)
+      if (this.customerSuggestTimer) clearTimeout(this.customerSuggestTimer)
+      this.customerSuggestTimer = setTimeout(() => {
+        this.fetchCustomerSuggest(kw)
+      }, 250)
     },
 
     onSelectCustomer(item) {
@@ -589,7 +593,9 @@ export default {
           data: {
             action: 'list',
             token,
-            data: {}
+            data: {
+              pageSize: 500
+            }
           }
         })
 
@@ -634,6 +640,49 @@ export default {
         }
       } catch (e) {
         console.error('loadCustomers error', e)
+      }
+    },
+
+    async fetchCustomerSuggest(keyword) {
+      const token = getToken()
+      if (!token) {
+        this.customerSuggests = []
+        ensureLogin()
+        return
+      }
+
+      try {
+        const res = await uniCloud.callFunction({
+          name: 'crm-customer',
+          data: {
+            action: 'suggest',
+            token,
+            data: {
+              keyword,
+              limit: 20
+            }
+          }
+        })
+
+        const result = res.result || {}
+        if (result.code === 401) {
+          this.customerSuggests = []
+          ensureLogin()
+          return
+        }
+        if (result.code !== 0) {
+          this.customerSuggests = []
+          return
+        }
+
+        const list = (result.data || []).map((c) => {
+          const oid = c && c._id && c._id.$oid ? c._id.$oid : c && c._id
+          return { ...c, _id: oid ? String(oid) : '' }
+        })
+        this.customerSuggests = list
+      } catch (err) {
+        console.error('fetchCustomerSuggest error', err)
+        this.customerSuggests = []
       }
     },
 
