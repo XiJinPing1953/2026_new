@@ -250,23 +250,22 @@
 								</text>
 							</view>
 
-							<button class="btn-secondary btn-export" @click="exportFilling">
-								导出
-							</button>
-						</view>
-
-						<view class="list-filter">
-							<view class="search-wrapper">
-								<input
-									class="search-input"
-									type="text"
-									v-model="listBottleKeyword"
-									placeholder="按瓶号搜索灌装记录"
-									@input="onListKeywordInput"
-								/>
-								<view v-if="listBottleKeyword" class="search-clear" @click="clearListKeyword">×</view>
+							<view class="card-actions">
+								<view class="search-compact">
+									<input
+										class="search-input"
+										type="text"
+										v-model="listBottleKeyword"
+										placeholder="按瓶号搜索"
+										@input="onListKeywordInput"
+									/>
+									<view v-if="listBottleKeyword" class="search-clear" @click="clearListKeyword">×</view>
+								</view>
+								<button class="btn-soft btn-search" @click="onSearchBottleList">搜索</button>
+								<button class="btn-secondary btn-export" @click="exportFilling">
+									导出
+								</button>
 							</view>
-							<button class="btn-soft btn-search" @click="onSearchBottleList">搜索</button>
 						</view>
 
 						<view v-if="loadingList" class="list-empty">
@@ -487,8 +486,11 @@ this.isAdmin = isAdminRole(this.userInfo)
                         },
 
                         onOperatorFocus() {
-                                this.showOperatorDropdown = true
-                                this.updateOperatorSuggestions(this.form.operator)
+                                // 仅在有关键字时展示下拉，避免一 focus 就展示全量
+                                const kw = (this.form.operator || '').trim()
+                                if (kw) {
+                                        this.updateOperatorSuggestions(kw)
+                                }
                         },
 
                         onOperatorBlur() {
@@ -513,7 +515,7 @@ this.isAdmin = isAdminRole(this.userInfo)
                                         }))
                                         .filter(item => item.display)
                                         .filter(item => {
-                                                if (!kw) return true
+                                                if (!kw) return false
                                                 return item.display.toLowerCase().includes(kw)
                                         })
                                         .slice(0, 8)
@@ -1391,6 +1393,12 @@ this.isAdmin = isAdminRole(this.userInfo)
 		justify-content: space-between;
 	}
 
+	.card-actions {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+	}
+
 	.card-header-main {
 		display: flex;
 		flex-direction: column;
@@ -1524,25 +1532,16 @@ this.isAdmin = isAdminRole(this.userInfo)
 		padding: 16rpx 0 4rpx;
 	}
 
-	.list-filter {
+	.search-compact {
 		display: flex;
 		align-items: center;
-		gap: 12rpx;
-		margin-bottom: 12rpx;
-		flex-wrap: wrap;
-	}
-
-	.search-wrapper {
-		flex: 1;
-		min-width: 320rpx;
-		height: 70rpx;
-		border-radius: 14rpx;
+		min-width: 220rpx;
+		height: 64rpx;
+		padding: 0 14rpx;
 		background: #f5f7fc;
-		display: flex;
-		align-items: center;
-		padding: 0 20rpx;
-		box-sizing: border-box;
 		border: 1rpx solid #e5e7eb;
+		border-radius: 12rpx;
+		box-sizing: border-box;
 	}
 
 	.search-input {
@@ -1558,15 +1557,15 @@ this.isAdmin = isAdminRole(this.userInfo)
 	}
 
 	.search-clear {
-		margin-left: 8rpx;
+		margin-left: 6rpx;
 		font-size: 32rpx;
 		color: #c0c4d4;
 		line-height: 1;
 	}
 
 	.btn-search {
-		padding: 14rpx 20rpx;
-		min-width: 120rpx;
+		padding: 12rpx 18rpx;
+		min-width: 110rpx;
 	}
 
 	.loading-text {
