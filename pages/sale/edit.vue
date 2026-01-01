@@ -1869,7 +1869,14 @@
 
 				if (row.number.trim() !== keyword.trim()) return
 
-				this.$set(row, 'suggestions', list)
+				let filtered = list
+				if (type === 'out') {
+					filtered = list.filter((item) => this.isOutStatusAllowed(item.status))
+				} else if (type === 'back') {
+					filtered = list.filter((item) => this.isBackStatusAllowed(item.status))
+				}
+
+				this.$set(row, 'suggestions', filtered)
 			},
 
 			// 加载基础数据
@@ -2084,7 +2091,9 @@
 					exists: null,
 					suggestions: [],
 					fromSelect: false,
-					netManual: false
+					netManual: false,
+					status: '',
+					statusBlocked: false
 				})
 			},
 
@@ -2109,6 +2118,8 @@
 				row.fromSelect = false
 				row.exists = null
 				row.bottleId = null
+				row.status = ''
+				row.statusBlocked = false
 
 				if (!val) {
 					row.suggestions = []
@@ -2119,6 +2130,13 @@
 			},
 
 			onSelectOutBottle(index, item) {
+				if (!this.isOutStatusAllowed(item.status)) {
+					uni.showToast({
+						title: `瓶子状态为「${this.statusTextMap[item.status] || '未知'}」，无法出瓶`,
+						icon: 'none'
+					})
+					return
+				}
 				this.selectingSuggestion = true
 				setTimeout(() => {
 					this.selectingSuggestion = false
@@ -2129,6 +2147,8 @@
 					item.tare_weight != null ? String(item.tare_weight) : row.tare
 				row.bottleId = item._id
 				row.exists = true
+				row.status = item.status
+				row.statusBlocked = false
 				row.fromSelect = true
 				row.suggestions = []
 				row.netManual = false
@@ -2172,6 +2192,17 @@
 						if (!row.tare && found.tare_weight != null) {
 							row.tare = String(found.tare_weight)
 						}
+						row.status = found.status
+						if (!this.isOutStatusAllowed(found.status)) {
+							row.statusBlocked = true
+							uni.showToast({
+								title: `瓶子状态为「${this.statusTextMap[found.status] || '未知'}」，无法出瓶`,
+								icon: 'none'
+							})
+							return
+						} else {
+							row.statusBlocked = false
+						}
 						row.netManual = false
 						this.updateOutNet(index)
 					} else {
@@ -2210,7 +2241,9 @@
 					exists: null,
 					suggestions: [],
 					fromSelect: false,
-					netManual: false
+					netManual: false,
+					status: '',
+					statusBlocked: false
 				})
 			},
 
@@ -2233,6 +2266,8 @@
 				row.fromSelect = false
 				row.exists = null
 				row.bottleId = null
+				row.status = ''
+				row.statusBlocked = false
 
 				if (!val) {
 					row.suggestions = []
@@ -2243,6 +2278,13 @@
 			},
 
 			onSelectBackBottle(i, item) {
+				if (!this.isBackStatusAllowed(item.status)) {
+					uni.showToast({
+						title: `瓶子状态为「${this.statusTextMap[item.status] || '未知'}」，无法回瓶`,
+						icon: 'none'
+					})
+					return
+				}
 				this.selectingSuggestion = true
 				setTimeout(() => {
 					this.selectingSuggestion = false
@@ -2253,6 +2295,8 @@
 					item.tare_weight != null ? String(item.tare_weight) : row.tare
 				row.bottleId = item._id
 				row.exists = true
+				row.status = item.status
+				row.statusBlocked = false
 				row.fromSelect = true
 				row.suggestions = []
 				row.netManual = false
@@ -2296,6 +2340,17 @@
 						if (!row.tare && found.tare_weight != null) {
 							row.tare = String(found.tare_weight)
 						}
+						row.status = found.status
+						if (!this.isBackStatusAllowed(found.status)) {
+							row.statusBlocked = true
+							uni.showToast({
+								title: `瓶子状态为「${this.statusTextMap[found.status] || '未知'}」，无法回瓶`,
+								icon: 'none'
+							})
+							return
+						} else {
+							row.statusBlocked = false
+						}
 						row.netManual = false
 						this.updateBackNet(i)
 					} else {
@@ -2323,6 +2378,16 @@
 				} else {
 					row.net = ''
 				}
+			},
+
+			isOutStatusAllowed(status) {
+				if (!status) return true
+				return status === 'in_station'
+			},
+
+			isBackStatusAllowed(status) {
+				if (!status) return true
+				return status === 'at_customer'
 			},
 
 			// 存瓶
@@ -2685,6 +2750,31 @@
 						if (isNaN(Number(val))) {
 							uni.showToast({
 								title: '重量字段需为数字',
+								icon: 'none'
+							})
+							return false
+						}
+					}
+
+					if (row.statusBlocked) {
+						uni.showToast({
+							title: `瓶子状态不允许：${this.statusTextMap[row.status] || '未知'}`,
+							icon: 'none'
+						})
+						return false
+					}
+
+					if (row.status) {
+						if (this.outBottles.includes(row) && !this.isOutStatusAllowed(row.status)) {
+							uni.showToast({
+								title: `瓶子状态不允许出瓶：${this.statusTextMap[row.status] || '未知'}`,
+								icon: 'none'
+							})
+							return false
+						}
+						if (this.backBottles.includes(row) && !this.isBackStatusAllowed(row.status)) {
+							uni.showToast({
+								title: `瓶子状态不允许回瓶：${this.statusTextMap[row.status] || '未知'}`,
 								icon: 'none'
 							})
 							return false
