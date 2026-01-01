@@ -1538,12 +1538,16 @@ this.isAdmin = isAdminRole(this.userInfo)
 
 	.btn-action {
 		min-width: 120rpx;
-		padding: 12rpx 18rpx;
-		border-radius: 14rpx;
+		height: 70rpx;
+		padding: 0 18rpx;
+		border-radius: 12rpx;
 		background: #f3f4f6;
 		border: 1rpx solid #e5e7eb;
 		color: #374151;
 		font-size: 24rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.btn-action:active {
@@ -1687,7 +1691,7 @@ this.isAdmin = isAdminRole(this.userInfo)
 		display: flex;
 		align-items: center;
 		min-width: 220rpx;
-		height: 64rpx;
+		height: 70rpx;
 		padding: 0 14rpx;
 		background: #f5f7fc;
 		border: 1rpx solid #e5e7eb;
@@ -1697,6 +1701,7 @@ this.isAdmin = isAdminRole(this.userInfo)
 
 	.search-input {
 		flex: 1;
+		height: 100%;
 		border: none;
 		background: transparent;
 		font-size: 24rpx;
