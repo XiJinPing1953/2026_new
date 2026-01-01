@@ -210,10 +210,11 @@ exports.main = async (event, context) => {
 	if (action === 'list') {
 		const {
 			page = 1,
-				pageSize = 50,
-				start_date,
-				end_date,
-				bottle_no
+			pageSize = 50,
+			start_date,
+			end_date,
+			bottle_no,
+			keyword
 		} = data || {}
 
 		const where = {}
@@ -230,8 +231,10 @@ exports.main = async (event, context) => {
 			}
 		}
 
-		if (bottle_no) {
-			where.bottle_no = (bottle_no || '').trim()
+		const kw = (keyword || bottle_no || '').trim()
+		if (kw) {
+			const pattern = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+			where.bottle_no = { $regex: pattern, $options: 'i' }
 		}
 
 		const skip = (page - 1) * pageSize
