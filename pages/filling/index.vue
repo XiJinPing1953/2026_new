@@ -290,7 +290,7 @@
 							</view>
 
 							<view v-for="item in fillingList" :key="item._id" class="list-row">
-								<text class="col-time">{{ item.date || '--' }}</text>
+								<text class="col-time">{{ formatDateTime(item.created_at, item.date) }}</text>
 								<text class="col-bottle">{{ item.bottle_no || '--' }}</text>
 								<text class="col-num">{{ formatKg(item.tare_fill) }}</text>
 								<text class="col-num">{{ formatKg(item.gross_fill) }}</text>
@@ -557,6 +557,22 @@ this.isAdmin = isAdminRole(this.userInfo)
 				return n.toFixed(2)
 			},
 
+			formatDateTime(ts, dateStr) {
+				if (ts) {
+					const d = new Date(Number(ts))
+					if (!isNaN(d.getTime())) {
+						const y = d.getFullYear()
+						const m = String(d.getMonth() + 1).padStart(2, '0')
+						const day = String(d.getDate()).padStart(2, '0')
+						const hh = String(d.getHours()).padStart(2, '0')
+						const mm = String(d.getMinutes()).padStart(2, '0')
+						return `${y}-${m}-${day} ${hh}:${mm}`
+					}
+				}
+				if (dateStr) return dateStr
+				return '--'
+			},
+
 			// ---- 时间预设 ----
 			changePreset(preset) {
 				if (this.filterPreset === preset && preset !== 'custom') return
@@ -639,17 +655,18 @@ this.isAdmin = isAdminRole(this.userInfo)
                                 }
                         },
 
-                        async fetchList() {
-                                if (!this.dateRange.start || !this.dateRange.end) return
+			async fetchList() {
+				if (!this.dateRange.start || !this.dateRange.end) return
 
-                                this.loadingList = true
-                                try {
-                                        const result = await this.callFilling('list', {
-                                                page: 1,
-                                                pageSize: 100,
-                                                start_date: this.dateRange.start,
-                                                end_date: this.dateRange.end
-                                        })
+				this.loadingList = true
+				try {
+					const result = await this.callFilling('list', {
+						page: 1,
+						pageSize: 100,
+						start_date: this.dateRange.start,
+						end_date: this.dateRange.end,
+						bottle_no: (this.listBottleKeyword || '').trim()
+					})
                                         if (result && result.code === 0 && Array.isArray(result.data)) {
                                                 this.fillingList = result.data
                                         } else if (result && result.code !== 401) {

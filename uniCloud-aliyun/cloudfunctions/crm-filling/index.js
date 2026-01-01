@@ -284,8 +284,7 @@ exports.main = async (event, context) => {
 
 		const kw = (keyword || bottle_no || '').trim()
 		if (kw) {
-			const pattern = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-			where.bottle_no = { $regex: pattern, $options: 'i' }
+			where.bottle_no = kw
 		}
 
 		const skip = (page - 1) * pageSize
