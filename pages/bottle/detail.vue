@@ -400,11 +400,9 @@ export default {
 
         // 销售记录
         saleList.forEach(it => {
-          merged.push({
+          const base = {
             type: 'sale',
-            role: it.role || 'record',
             customer_name: it.customer_name,
-            net_weight: it.net_weight,
             unit_price: it.unit_price,
             price_unit: it.price_unit,
             remark: it.remark,
@@ -412,6 +410,46 @@ export default {
             updated_at: it.updated_at,
             date: it.date,
             _raw: it
+          }
+
+          const role = it.role || ''
+          if (role === 'out' || role === 'back' || role === 'deposit') {
+            merged.push({
+              ...base,
+              role,
+              net_weight: it.net_weight,
+              role_text: it.role_text
+            })
+            return
+          }
+
+          // Truck 或单条闭环：拆分出瓶 / 回瓶节点
+          if (it.biz_mode === 'truck' || (it.price_unit === 'truck' && it.net_weight != null)) {
+            merged.push({
+              ...base,
+              role: 'out',
+              net_weight:
+                it.out_net_total ??
+                it.total_net_weight ??
+                it.net_weight_out ??
+                it.net_weight ??
+                null,
+              role_text: '出瓶'
+            })
+            merged.push({
+              ...base,
+              role: 'back',
+              net_weight: it.back_net_total ?? it.net_weight_back ?? 0,
+              role_text: '回瓶'
+            })
+            return
+          }
+
+          // 兜底：普通记录
+          merged.push({
+            ...base,
+            role: 'record',
+            net_weight: it.net_weight
           })
         })
 
@@ -433,11 +471,12 @@ export default {
           })
         })
 
-        // 按时间倒序排序
+        // 按时间正序排序；同一时间出瓶在前、回瓶在后
         merged.sort((a, b) => {
           const ta = this.recordTimestamp(a)
           const tb = this.recordTimestamp(b)
-          return tb - ta // 新的在前
+          if (ta !== tb) return ta - tb
+          return this.roleSortOrder(a.role) - this.roleSortOrder(b.role)
         })
 
         this.records = merged
@@ -463,6 +502,17 @@ export default {
         return new Date(item.date).getTime()
       }
       return 0
+    },
+
+    roleSortOrder(role) {
+      const map = {
+        out: 0,
+        fill: 1,
+        deposit: 2,
+        back: 3,
+        record: 4
+      }
+      return map[role] != null ? map[role] : 99
     },
 
     roleLabel(role) {
@@ -753,6 +803,17 @@ export default {
     width: 2rpx;
     background: #e5e7eb;
     margin-top: 4rpx;
+    position: relative;
+  }
+
+  .timeline-line::after {
+    content: '↓';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    color: #9ca3af;
+    font-size: 20rpx;
   }
 
   /* 内容 */
