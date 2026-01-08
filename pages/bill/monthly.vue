@@ -14,8 +14,8 @@
 
 					<!-- 联想下拉 -->
 					<view v-if="showCustomerDropdown" class="suggest-panel">
-						<view v-if="filteredCustomers.length" class="suggest-list">
-							<view v-for="item in filteredCustomers" :key="item._id" class="suggest-item"
+						<view v-if="customerSuggestions.length" class="suggest-list">
+							<view v-for="item in customerSuggestions" :key="item._id" class="suggest-item"
 								@click.stop="onSelectCustomer(item)" @mousedown.stop.prevent="onSelectCustomer(item)"
 								@touchstart.stop.prevent="onSelectCustomer(item)">
 								<text class="suggest-name">{{ item.name }}</text>
@@ -163,11 +163,12 @@
 		data() {
 			return {
 				// 客户相关
-				customers: [],
 				customerKeyword: '',
 				customerId: '',
 				customerName: '',
 				showCustomerDropdown: false,
+				customerSuggestions: [],
+				customerSuggestTimer: null,
 
 				// 时间段
 				startDate: '', // YYYY-MM-DD
@@ -188,21 +189,10 @@
 			}
 		},
 
-		computed: {
-			// 本地联想列表
-			filteredCustomers() {
-				const kw = (this.customerKeyword || '').trim()
-				if (!kw) return []
-				const lower = kw.toLowerCase()
-				return (this.customers || [])
-					.filter((c) => (c.name || '').toLowerCase().indexOf(lower) !== -1)
-					.slice(0, 20)
-			}
-		},
+		computed: {},
 
 		onLoad() {
 			this.initDateRange()
-			this.loadCustomers()
 			// 默认：全部客户 + 最近 1 个月（等 data 更新完再拉一次）
 			this.$nextTick(() => {
 				this.loadSummaryByRange()
@@ -242,55 +232,32 @@
 				this.endDate = fmt(end)
 			},
 
-			async loadCustomers() {
-				try {
-					const token = this.getToken()
-					if (!token) return
-
-					const res = await uniCloud.callFunction({
-						name: 'crm-customer',
-						data: {
-							action: 'list',
-							token,
-							data: {}
-						}
-					})
-					const result = res.result || {}
-					if (result.code !== 0) {
-						uni.showToast({
-							title: result.msg || '加载客户失败',
-							icon: 'none'
-						})
-						return
-					}
-					const list = (result.data || []).map(c => {
-						const oid = c && c._id && c._id.$oid ? c._id.$oid : c && c._id
-						return { ...c, _id: oid ? String(oid) : '' }
-					})
-					this.customers = list
-					console.log('[monthly] customers loaded:', list.length, list[0])
-				} catch (e) {
-					console.error('loadCustomers error', e)
-					uni.showToast({
-						title: '加载客户失败',
-						icon: 'none'
-					})
-				}
-			},
-
 			onCustomerInput(e) {
 				this.customerKeyword = e.detail.value
-				this.showCustomerDropdown = !!this.customerKeyword
-				console.log('[monthly] input kw:', this.customerKeyword, 'filtered len=', this.filteredCustomers.length)
-				// 只做联想，不在这里查汇总
+				const kw = (this.customerKeyword || '').trim()
+				this.showCustomerDropdown = !!kw
+				if (!kw) {
+					this.customerSuggestions = []
+					if (this.customerSuggestTimer) clearTimeout(this.customerSuggestTimer)
+					return
+				}
+
+				if (this.customerSuggestTimer) clearTimeout(this.customerSuggestTimer)
+				this.customerSuggestTimer = setTimeout(() => {
+					this.fetchCustomerSuggest(kw)
+				}, 250)
 			},
 
 			onCustomerConfirm() {
 				// 回车时，如果刚好只有一个匹配，自动选中
-				if (this.filteredCustomers.length === 1) {
-					this.onSelectCustomer(this.filteredCustomers[0])
+				const kw = (this.customerKeyword || '').trim()
+				if (!kw) return
+
+				if (this.customerSuggestions.length === 1) {
+					this.onSelectCustomer(this.customerSuggestions[0])
 				} else {
 					this.showCustomerDropdown = true
+					this.fetchCustomerSuggest(kw)
 				}
 			},
 
@@ -302,6 +269,54 @@
 				this.showCustomerDropdown = false
 				console.log('[monthly] selected customerId:', this.customerId)
 				this.loadSummaryByRange()
+			},
+
+			async fetchCustomerSuggest(keyword) {
+				const kw = (keyword || '').trim()
+				if (!kw) {
+					this.customerSuggestions = []
+					return
+				}
+
+				const token = this.getToken()
+				if (!token) {
+					this.customerSuggestions = []
+					return
+				}
+
+				try {
+					const res = await uniCloud.callFunction({
+						name: 'crm-customer',
+						data: {
+							action: 'suggest',
+							token,
+							data: {
+								keyword: kw,
+								limit: 20
+							}
+						}
+					})
+
+					const result = res.result || {}
+					if (result.code === 401) {
+						this.customerSuggestions = []
+						ensureLogin()
+						return
+					}
+					if (result.code !== 0) {
+						this.customerSuggestions = []
+						return
+					}
+
+					const list = (result.data || []).map((c) => {
+						const oid = c && c._id && c._id.$oid ? c._id.$oid : c && c._id
+						return { ...c, _id: oid ? String(oid) : '' }
+					})
+					this.customerSuggestions = list
+				} catch (err) {
+					console.error('fetchCustomerSuggest error', err)
+					this.customerSuggestions = []
+				}
 			},
 
 			/* ===== 时间段选择 ===== */

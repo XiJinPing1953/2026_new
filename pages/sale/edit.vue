@@ -559,6 +559,7 @@
 				customerIndex: -1,
 				customerKeyword: '',
 				customerSuggests: [],
+				debouncedCustomerSuggest: null,
 
 				deliveryList: [],
 				deliveryIndex1: -1,
@@ -1184,6 +1185,7 @@
 			this.loadVehicles()
 
 			this.debouncedBottleSuggest = debounce(this.doBottleSuggest, 200)
+			this.debouncedCustomerSuggest = debounce(this.fetchCustomerSuggest, 250)
 
 			if (this.isEditing && this.editId) {
 				this.loadSaleForEdit(this.editId)
@@ -1664,23 +1666,21 @@
 
 			// 客户联想输入
 			onCustomerInput(e) {
-				const val = e.detail.value.trim()
+				const val = e.detail.value
 				this.customerKeyword = val
+				const kw = val.trim()
 
-				if (!val) {
+				if (!kw) {
 					this.customerSuggests = []
 					this.header.customer_id = ''
 					this.header.customer_name = ''
 					return
 				}
 
-				const list = (this.customers || []).filter(c => {
-					if (!c || !c.name) return false
-					return c.name.indexOf(val) !== -1
-				})
-
-				this.customerSuggests = list.slice(0, 20)
-				console.log('[sale/edit] customer suggest len:', this.customerSuggests.length)
+				if (!this.debouncedCustomerSuggest) {
+					this.debouncedCustomerSuggest = debounce(this.fetchCustomerSuggest, 250)
+				}
+				this.debouncedCustomerSuggest(kw)
 			},
 
 			onSelectCustomer(item) {
@@ -1869,7 +1869,14 @@
 
 				if (row.number.trim() !== keyword.trim()) return
 
-				this.$set(row, 'suggestions', list)
+				let filtered = list
+				if (type === 'out') {
+					filtered = list.filter((item) => this.isOutStatusAllowed(item.status))
+				} else if (type === 'back') {
+					filtered = list.filter((item) => this.isBackStatusAllowed(item.status))
+				}
+
+				this.$set(row, 'suggestions', filtered)
 			},
 
 			// 加载基础数据
@@ -1881,7 +1888,9 @@
 						data: {
 							action: 'list',
 							token,
-							data: {}
+							data: {
+								pageSize: 500
+							}
 						}
 					})
 					if (this.handleAuthError(res)) return
@@ -1896,6 +1905,50 @@
 					}
 				} catch (e) {
 					console.error('加载客户异常', e)
+				}
+			},
+
+			async fetchCustomerSuggest(keyword) {
+				const kw = (keyword || '').trim()
+				if (!kw) {
+					this.customerSuggests = []
+					return
+				}
+
+				const token = getToken()
+				if (!token) {
+					this.customerSuggests = []
+					ensureLogin()
+					return
+				}
+
+				try {
+					const res = await uniCloud.callFunction({
+						name: 'crm-customer',
+						data: {
+							action: 'suggest',
+							token,
+							data: {
+								keyword: kw,
+								limit: 20
+							}
+						}
+					})
+					if (this.handleAuthError(res)) return
+					if (res.result?.code !== 0) {
+						this.customerSuggests = []
+						return
+					}
+
+					const list = (res.result.data || []).map((c) => {
+						const oid = c && c._id && c._id.$oid ? c._id.$oid : c && c._id
+						return { ...c, _id: oid ? String(oid) : '' }
+					})
+					this.customerSuggests = list
+					console.log('[sale/edit] customer suggest len:', this.customerSuggests.length)
+				} catch (err) {
+					console.error('fetchCustomerSuggest error', err)
+					this.customerSuggests = []
 				}
 			},
 
@@ -2038,7 +2091,9 @@
 					exists: null,
 					suggestions: [],
 					fromSelect: false,
-					netManual: false
+					netManual: false,
+					status: '',
+					statusBlocked: false
 				})
 			},
 
@@ -2063,6 +2118,8 @@
 				row.fromSelect = false
 				row.exists = null
 				row.bottleId = null
+				row.status = ''
+				row.statusBlocked = false
 
 				if (!val) {
 					row.suggestions = []
@@ -2073,6 +2130,13 @@
 			},
 
 			onSelectOutBottle(index, item) {
+				if (!this.isOutStatusAllowed(item.status)) {
+					uni.showToast({
+						title: `瓶子状态为「${this.statusTextMap[item.status] || '未知'}」，无法出瓶`,
+						icon: 'none'
+					})
+					return
+				}
 				this.selectingSuggestion = true
 				setTimeout(() => {
 					this.selectingSuggestion = false
@@ -2083,6 +2147,8 @@
 					item.tare_weight != null ? String(item.tare_weight) : row.tare
 				row.bottleId = item._id
 				row.exists = true
+				row.status = item.status
+				row.statusBlocked = false
 				row.fromSelect = true
 				row.suggestions = []
 				row.netManual = false
@@ -2126,6 +2192,17 @@
 						if (!row.tare && found.tare_weight != null) {
 							row.tare = String(found.tare_weight)
 						}
+						row.status = found.status
+						if (!this.isOutStatusAllowed(found.status)) {
+							row.statusBlocked = true
+							uni.showToast({
+								title: `瓶子状态为「${this.statusTextMap[found.status] || '未知'}」，无法出瓶`,
+								icon: 'none'
+							})
+							return
+						} else {
+							row.statusBlocked = false
+						}
 						row.netManual = false
 						this.updateOutNet(index)
 					} else {
@@ -2164,7 +2241,9 @@
 					exists: null,
 					suggestions: [],
 					fromSelect: false,
-					netManual: false
+					netManual: false,
+					status: '',
+					statusBlocked: false
 				})
 			},
 
@@ -2187,6 +2266,8 @@
 				row.fromSelect = false
 				row.exists = null
 				row.bottleId = null
+				row.status = ''
+				row.statusBlocked = false
 
 				if (!val) {
 					row.suggestions = []
@@ -2197,6 +2278,13 @@
 			},
 
 			onSelectBackBottle(i, item) {
+				if (!this.isBackStatusAllowed(item.status)) {
+					uni.showToast({
+						title: `瓶子状态为「${this.statusTextMap[item.status] || '未知'}」，无法回瓶`,
+						icon: 'none'
+					})
+					return
+				}
 				this.selectingSuggestion = true
 				setTimeout(() => {
 					this.selectingSuggestion = false
@@ -2207,6 +2295,8 @@
 					item.tare_weight != null ? String(item.tare_weight) : row.tare
 				row.bottleId = item._id
 				row.exists = true
+				row.status = item.status
+				row.statusBlocked = false
 				row.fromSelect = true
 				row.suggestions = []
 				row.netManual = false
@@ -2250,6 +2340,17 @@
 						if (!row.tare && found.tare_weight != null) {
 							row.tare = String(found.tare_weight)
 						}
+						row.status = found.status
+						if (!this.isBackStatusAllowed(found.status)) {
+							row.statusBlocked = true
+							uni.showToast({
+								title: `瓶子状态为「${this.statusTextMap[found.status] || '未知'}」，无法回瓶`,
+								icon: 'none'
+							})
+							return
+						} else {
+							row.statusBlocked = false
+						}
 						row.netManual = false
 						this.updateBackNet(i)
 					} else {
@@ -2277,6 +2378,16 @@
 				} else {
 					row.net = ''
 				}
+			},
+
+			isOutStatusAllowed(status) {
+				if (!status) return true
+				return status === 'in_station'
+			},
+
+			isBackStatusAllowed(status) {
+				if (!status) return true
+				return status === 'at_customer'
 			},
 
 			// 存瓶
@@ -2639,6 +2750,31 @@
 						if (isNaN(Number(val))) {
 							uni.showToast({
 								title: '重量字段需为数字',
+								icon: 'none'
+							})
+							return false
+						}
+					}
+
+					if (row.statusBlocked) {
+						uni.showToast({
+							title: `瓶子状态不允许：${this.statusTextMap[row.status] || '未知'}`,
+							icon: 'none'
+						})
+						return false
+					}
+
+					if (row.status) {
+						if (this.outBottles.includes(row) && !this.isOutStatusAllowed(row.status)) {
+							uni.showToast({
+								title: `瓶子状态不允许出瓶：${this.statusTextMap[row.status] || '未知'}`,
+								icon: 'none'
+							})
+							return false
+						}
+						if (this.backBottles.includes(row) && !this.isBackStatusAllowed(row.status)) {
+							uni.showToast({
+								title: `瓶子状态不允许回瓶：${this.statusTextMap[row.status] || '未知'}`,
 								icon: 'none'
 							})
 							return false

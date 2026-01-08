@@ -134,7 +134,10 @@ exports.main = async (event, context) => {
     const ps = Math.min(Math.max(Number(pageSize) || 50, 1), 200)
     const skip = (p - 1) * ps
 
-    const query = customersCol.where(finalWhere).orderBy('created_at', 'desc')
+    const query = customersCol
+      .where(finalWhere)
+      .orderBy('updated_at', 'desc')
+      .orderBy('_id', 'desc')
     const [listRes, countRes] = await Promise.all([
       query.skip(skip).limit(ps).get(),
       customersCol.where(finalWhere).count()

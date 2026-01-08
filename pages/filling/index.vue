@@ -62,19 +62,8 @@
 					</view>
 				</view>
 
-				<!-- 概览三个大数字 -->
+				<!-- 概览数字 -->
 				<view class="summary-row" v-if="!loadingSummary">
-					<view class="summary-card">
-						<view class="summary-label">进站总量</view>
-						<view class="summary-value-row">
-							<text class="summary-value">
-								{{ formatKg(summary.inbound_total) }}
-							</text>
-							<text class="summary-unit">kg</text>
-						</view>
-						<text class="summary-tip">期间所有入库天然气净重合计</text>
-					</view>
-
 					<view class="summary-card">
 						<view class="summary-label">灌装总量</view>
 						<view class="summary-value-row">
@@ -101,28 +90,6 @@
 				<view class="summary-row loading" v-else>
 					<text class="loading-text">正在统计灌装与损耗数据...</text>
 				</view>
-
-				<!-- 差值说明 -->
-				<view class="diff-row" v-if="!loadingSummary">
-					<view class="diff-item">
-						<text class="diff-label">进站 → 灌装 差值</text>
-						<text class="diff-value" :class="{ danger: Math.abs(diffInboundFillRaw) > diffThreshold }">
-							{{ formatKg(diffInboundFillRaw) }} kg
-						</text>
-					</view>
-					<view class="diff-item">
-						<text class="diff-label">灌装 → 销售 差值</text>
-						<text class="diff-value" :class="{ danger: Math.abs(diffFillSaleRaw) > diffThreshold }">
-							{{ formatKg(diffFillSaleRaw) }} kg
-						</text>
-					</view>
-					<view class="diff-item">
-						<text class="diff-label">进站 → 销售 总差值</text>
-						<text class="diff-value" :class="{ danger: Math.abs(diffInboundSaleRaw) > diffThreshold }">
-							{{ formatKg(diffInboundSaleRaw) }} kg
-						</text>
-					</view>
-				</view>
 			</view>
 
 			<!-- 中部：左表单 + 右列表 -->
@@ -130,7 +97,7 @@
 				<!-- 左：新增灌装记录（非管理员整卡灰化） -->
 				<view class="col-left">
 					<view class="card" :class="{ 'card-disabled': !isAdmin }">
-						<view class="card-header">
+							<view class="card-header">
 							<text class="card-title">
 								{{ isEditing ? '编辑灌装记录' : '新增灌装记录' }}
 							</text>
@@ -210,29 +177,29 @@
                                                         <view class="form-row">
                                                                 <text class="form-label">灌装后毛重 (kg)</text>
                                                                 <input class="form-input" :disabled="!isAdmin" v-model="form.gross_fill" type="digit"
-                                                                        placeholder="灌装后称的毛重" />
+                                                                        placeholder="灌装后称的毛重" @input="onGrossInput" />
                                                         </view>
 
                                                         <view class="form-row">
                                                                 <text class="form-label">灌装前皮重 (kg)</text>
                                                                 <input class="form-input" :disabled="!isAdmin" v-model="form.tare_fill" type="digit"
-                                                                        placeholder="站上称的空瓶重量" />
+                                                                        placeholder="站上称的空瓶重量" @input="onTareInput" />
                                                         </view>
 
-							<view class="form-row">
-								<text class="form-label">灌装净重 (kg)</text>
-								<view class="form-static">
-									<text :class="{
-                      'net-value': true,
-                      danger: netFillRaw <= 0
-                    }">
-										{{ netFillText }}
-									</text>
-									<text class="form-hint" v-if="netFillRaw <= 0">
-										净重≤0，请检查皮重/毛重是否录反
-									</text>
-								</view>
-							</view>
+						<view class="form-row">
+							<text class="form-label">灌装净重 (kg)</text>
+							<input
+								class="form-input"
+								:disabled="!isAdmin"
+								v-model="form.net_fill"
+								type="digit"
+								placeholder="可手动填写；留空则按 毛重-皮重 自动计算"
+								@input="onNetInput"
+							/>
+							<text class="form-hint" v-if="form.net_fill !== '' && netFillNumber <= 0">
+								净重≤0，请检查皮重/毛重或手动输入正确净重
+							</text>
+						</view>
 
                                 <view class="form-row operator-row">
                                         <text class="form-label">操作员</text>
@@ -275,7 +242,7 @@
 				<!-- 右：灌装记录列表 -->
 				<view class="col-right">
 					<view class="card">
-						<view class="card-header card-header-with-actions">
+							<view class="card-header card-header-with-actions">
 							<view class="card-header-main">
 								<text class="card-title">灌装记录</text>
 								<text class="card-sub">
@@ -283,9 +250,22 @@
 								</text>
 							</view>
 
-							<button class="btn-secondary btn-export" @click="exportFilling">
-								导出
-							</button>
+							<view class="card-actions">
+								<view class="search-compact">
+									<input
+										class="search-input"
+										type="text"
+										v-model="listBottleKeyword"
+										placeholder="按瓶号搜索"
+										@input="onListKeywordInput"
+									/>
+									<view v-if="listBottleKeyword" class="search-clear" @click="clearListKeyword">×</view>
+								</view>
+								<button class="btn-action" @click="onSearchBottleList">搜索</button>
+								<button class="btn-action" @click="exportFilling">
+									导出
+								</button>
+							</view>
 						</view>
 
 						<view v-if="loadingList" class="list-empty">
@@ -310,7 +290,7 @@
 							</view>
 
 							<view v-for="item in fillingList" :key="item._id" class="list-row">
-								<text class="col-time">{{ item.date || '--' }}</text>
+								<text class="col-time">{{ formatDateTime(item.created_at, item.date) }}</text>
 								<text class="col-bottle">{{ item.bottle_no || '--' }}</text>
 								<text class="col-num">{{ formatKg(item.tare_fill) }}</text>
 								<text class="col-num">{{ formatKg(item.gross_fill) }}</text>
@@ -377,7 +357,6 @@
 				// 概览数据
 				loadingSummary: false,
 				summary: {
-					inbound_total: 0,
 					fill_total: 0,
 					sale_total: 0
 				},
@@ -385,6 +364,8 @@
 				// 列表
 				loadingList: false,
 				fillingList: [],
+				listBottleKeyword: '',
+				debouncedListSearch: null,
 
                                 // 灌装表单（新增 / 编辑共用）
                                 form: {
@@ -392,13 +373,15 @@
                                         date: '',
                                         tare_fill: '',
                                         gross_fill: '',
+                                        net_fill: '',
                                         operator: '',
+					selectedOperatorId: '',
+					operatorConfirmed: false,
                                         remark: ''
                                 },
+				netManual: false,
+				lastEditedField: '',
 				submitting: false,
-
-				// 差值阈值
-				diffThreshold: 5,
 
 				// 瓶号联想 & 状态
 				statusTextMap: {
@@ -409,12 +392,14 @@
 					lost: '丢失',
 					unknown: '未知'
 				},
-				bottleSuggestions: [],
-				bottleSearchCache: {},
-				bottleSearchPending: {},
-				debouncedBottleSuggest: null,
-				bottleExists: null,
-				lastBottleInfo: null,
+					bottleSuggestions: [],
+					bottleSearchCache: {},
+					bottleSearchPending: {},
+					debouncedBottleSuggest: null,
+					bottleExists: null,
+					lastBottleInfo: null,
+					bottleBlocked: false,
+					bottleBlockedReason: '',
 
 				// 编辑状态
 				isEditing: false,
@@ -423,38 +408,9 @@
 		},
 
 		computed: {
-			// 当前表单灌装净重
-			netFillRaw() {
-				const tare = Number(this.form.tare_fill)
-				const gross = Number(this.form.gross_fill)
-				if (isNaN(tare) || isNaN(gross)) return 0
-				return +(gross - tare)
-			},
-			netFillText() {
-				return this.netFillRaw.toFixed(2)
-			},
-
-			// 差值
-			diffInboundFillRaw() {
-				const {
-					inbound_total,
-					fill_total
-				} = this.summary
-				return +(Number(inbound_total || 0) - Number(fill_total || 0))
-			},
-			diffFillSaleRaw() {
-				const {
-					fill_total,
-					sale_total
-				} = this.summary
-				return +(Number(fill_total || 0) - Number(sale_total || 0))
-			},
-			diffInboundSaleRaw() {
-				const {
-					inbound_total,
-					sale_total
-				} = this.summary
-				return +(Number(inbound_total || 0) - Number(sale_total || 0))
+			netFillNumber() {
+				const n = Number(this.form.net_fill)
+				return isNaN(n) ? 0 : n
 			},
 
 			// 皮重预警
@@ -481,7 +437,7 @@
                         }
                 },
 
-onLoad() {
+			onLoad() {
 if (!ensureLogin()) return
 
 this.userInfo = getUserInfo() || {}
@@ -494,6 +450,7 @@ this.isAdmin = isAdminRole(this.userInfo)
                         this.fetchAll()
 
 			this.debouncedBottleSuggest = debounce(this.doBottleSuggest, 200)
+			this.debouncedListSearch = debounce(this.fetchList, 250)
 		},
 
 		onShow() {
@@ -527,15 +484,27 @@ this.isAdmin = isAdminRole(this.userInfo)
                                 this.updateOperatorSuggestions(this.form.operator)
                         },
 
-                        onOperatorInput(e) {
-                                const value = e.detail && typeof e.detail.value === 'string' ? e.detail.value : ''
-                                this.form.operator = value
-                                this.updateOperatorSuggestions(value)
-                        },
+			onOperatorInput(e) {
+				const value = e.detail && typeof e.detail.value === 'string' ? e.detail.value : ''
+				this.form.operator = value
+				this.form.selectedOperatorId = ''
+				this.form.operatorConfirmed = false
+				if (!value.trim()) {
+					this.operatorSuggestions = []
+					this.showOperatorDropdown = false
+					return
+				}
+				this.updateOperatorSuggestions(value)
+			},
 
                         onOperatorFocus() {
-                                this.showOperatorDropdown = true
-                                this.updateOperatorSuggestions(this.form.operator)
+                                // 仅在有关键字时展示下拉，避免一 focus 就展示全量
+                                const kw = (this.form.operator || '').trim()
+                                if (kw) {
+                                        this.updateOperatorSuggestions(kw)
+                                } else {
+					this.showOperatorDropdown = false
+				}
                         },
 
                         onOperatorBlur() {
@@ -547,20 +516,22 @@ this.isAdmin = isAdminRole(this.userInfo)
                         selectOperator(item) {
                                 const name = (item && (item.name || item.real_name || item.phone)) || ''
                                 this.form.operator = name
+				this.form.selectedOperatorId = item && item._id ? String(item._id) : ''
+				this.form.operatorConfirmed = true
                                 this.showOperatorDropdown = false
                         },
 
                         updateOperatorSuggestions(keyword = '') {
                                 const list = Array.isArray(this.deliveryList) ? this.deliveryList : []
                                 const kw = (keyword || '').trim().toLowerCase()
-                                const filtered = list
+                                        const filtered = list
                                         .map(item => ({
                                                 ...item,
                                                 display: (item.name || item.real_name || item.phone || '').trim()
                                         }))
                                         .filter(item => item.display)
                                         .filter(item => {
-                                                if (!kw) return true
+                                                if (!kw) return false
                                                 return item.display.toLowerCase().includes(kw)
                                         })
                                         .slice(0, 8)
@@ -584,6 +555,22 @@ this.isAdmin = isAdminRole(this.userInfo)
 				const n = Number(v)
 				if (isNaN(n)) return '0.00'
 				return n.toFixed(2)
+			},
+
+			formatDateTime(ts, dateStr) {
+				if (ts) {
+					const d = new Date(Number(ts))
+					if (!isNaN(d.getTime())) {
+						const y = d.getFullYear()
+						const m = String(d.getMonth() + 1).padStart(2, '0')
+						const day = String(d.getDate()).padStart(2, '0')
+						const hh = String(d.getHours()).padStart(2, '0')
+						const mm = String(d.getMinutes()).padStart(2, '0')
+						return `${y}-${m}-${day} ${hh}:${mm}`
+					}
+				}
+				if (dateStr) return dateStr
+				return '--'
 			},
 
 			// ---- 时间预设 ----
@@ -668,17 +655,18 @@ this.isAdmin = isAdminRole(this.userInfo)
                                 }
                         },
 
-                        async fetchList() {
-                                if (!this.dateRange.start || !this.dateRange.end) return
+			async fetchList() {
+				if (!this.dateRange.start || !this.dateRange.end) return
 
-                                this.loadingList = true
-                                try {
-                                        const result = await this.callFilling('list', {
-                                                page: 1,
-                                                pageSize: 100,
-                                                start_date: this.dateRange.start,
-                                                end_date: this.dateRange.end
-                                        })
+				this.loadingList = true
+				try {
+					const result = await this.callFilling('list', {
+						page: 1,
+						pageSize: 100,
+						start_date: this.dateRange.start,
+						end_date: this.dateRange.end,
+						bottle_no: (this.listBottleKeyword || '').trim()
+					})
                                         if (result && result.code === 0 && Array.isArray(result.data)) {
                                                 this.fillingList = result.data
                                         } else if (result && result.code !== 401) {
@@ -740,6 +728,10 @@ this.isAdmin = isAdminRole(this.userInfo)
 				this.form.bottle_no = val
 				this.bottleExists = null
 				this.lastBottleInfo = null
+				this.bottleBlocked = false
+				this.bottleBlockedReason = ''
+				// 保持手动净重状态
+				this.netManual = this.netManual && !!this.form.net_fill
 
 				if (!val) {
 					this.bottleSuggestions = []
@@ -755,6 +747,7 @@ this.isAdmin = isAdminRole(this.userInfo)
 
 				if (item.tare_weight != null && this.form.tare_fill === '') {
 					this.form.tare_fill = String(item.tare_weight)
+					this.updateNetIfAuto()
 				}
 
                                 this.bottleExists = true
@@ -771,6 +764,7 @@ this.isAdmin = isAdminRole(this.userInfo)
                                         if (res && res.code === 401) return
                                         if (doc) {
                                                 this.lastBottleInfo = doc
+						this.handleBottleStatus(doc)
                                         }
                                 } catch (err) {
                                         console.error('load bottle detail after select error', err)
@@ -799,11 +793,15 @@ this.isAdmin = isAdminRole(this.userInfo)
                                                 this.bottleExists = true
                                                 if (!this.form.tare_fill && found.tare_weight != null) {
                                                         this.form.tare_fill = String(found.tare_weight)
+							this.updateNetIfAuto()
                                                 }
                                                 this.lastBottleInfo = found
+						this.handleBottleStatus(found)
                                         } else {
                                                 this.bottleExists = false
                                                 this.lastBottleInfo = null
+						this.bottleBlocked = false
+						this.bottleBlockedReason = ''
                                         }
 				} catch (err) {
 					console.error('onBottleBlur getByNumber error', err)
@@ -824,18 +822,33 @@ this.isAdmin = isAdminRole(this.userInfo)
                                 this.isEditing = true
                                 this.editingId = item._id
 
-                                this.form = {
-                                        bottle_no: item.bottle_no || '',
-                                        date: item.date || this.todayStr(),
-                                        tare_fill: item.tare_fill != null ? String(item.tare_fill) : '',
-                                        gross_fill: item.gross_fill != null ? String(item.gross_fill) : '',
-                                        operator: item.operator || '',
-                                        remark: item.remark || ''
-                                }
+				this.form = {
+					bottle_no: item.bottle_no || '',
+					date: item.date || this.todayStr(),
+					tare_fill: item.tare_fill != null ? String(item.tare_fill) : '',
+					gross_fill: item.gross_fill != null ? String(item.gross_fill) : '',
+					net_fill: item.net_fill != null ? String(item.net_fill) : '',
+					operator: item.operator || '',
+					selectedOperatorId: '',
+					operatorConfirmed: false,
+					remark: item.remark || ''
+				}
+				this.netManual = !!this.form.net_fill
+				this.lastEditedField = ''
+				if (this.form.operator) {
+					const matched = (this.deliveryList || []).find(
+						(d) => (d.name || d.real_name || d.phone) === this.form.operator
+					)
+					if (matched) {
+						this.form.selectedOperatorId = matched._id ? String(matched._id) : ''
+						this.form.operatorConfirmed = true
+					}
+				}
 
 				this.bottleSuggestions = []
 				this.bottleExists = true
 				this.lastBottleInfo = null
+				this.onBottleBlur()
 			},
 
 			exitEditMode() {
@@ -871,22 +884,41 @@ this.isAdmin = isAdminRole(this.userInfo)
 					return
 				}
 
-				const tare = Number(this.form.tare_fill)
-				const gross = Number(this.form.gross_fill)
-                                if (isNaN(tare) || isNaN(gross)) {
-                                        uni.showToast({
-                                                title: '请正确填写皮重和毛重',
-                                                icon: 'none'
-                                        })
-                                        return
-                                }
-                                if (gross <= tare) {
-                                        uni.showToast({
-                                                title: '毛重要大于皮重',
-                                                icon: 'none'
-                                        })
-                                        return
-                                }
+				const normalized = this.normalizeWeights()
+				const operator = (this.form.operator || '').trim()
+				if (!normalized) {
+					uni.showToast({
+						title: '请正确填写皮重和毛重',
+						icon: 'none'
+					})
+					return
+				}
+				const { tare, gross, net } = normalized
+				if (!net || !Number.isFinite(net) || net <= 0 || gross <= tare) {
+					uni.showToast({
+						title: '请填写正确的灌装净重',
+						icon: 'none'
+					})
+					return
+				}
+				if (!operator || !this.form.operatorConfirmed) {
+					uni.showToast({
+						title: '请选择操作员（需点选下拉项）',
+						icon: 'none'
+					})
+					return
+				}
+				if (this.bottleBlocked) {
+					uni.showToast({
+						title: `该瓶当前状态：${this.bottleBlockedReason || '不可灌装'}`,
+						icon: 'none'
+					})
+					return
+				}
+
+				this.form.tare_fill = normalized.tare.toFixed(2)
+				this.form.gross_fill = normalized.gross.toFixed(2)
+				this.form.net_fill = normalized.net.toFixed(2)
 
                                 this.submitting = true
                                 const bottleNo = (this.form.bottle_no || '').trim()
@@ -913,7 +945,7 @@ this.isAdmin = isAdminRole(this.userInfo)
                                         }
 
                                         if (existsFlag) {
-                                                const result = await this.doCreateFilling(tare, gross)
+                                                const result = await this.doCreateFilling(tare, gross, net)
 						if (result.code === 0) {
 							uni.showToast({
 								title: '已保存',
@@ -967,7 +999,7 @@ this.isAdmin = isAdminRole(this.userInfo)
 									return
 								}
 
-                                                        const result = await this.doCreateFilling(tare, gross)
+                                                        const result = await this.doCreateFilling(tare, gross, net)
 								if (result.code === 0) {
 									uni.showToast({
 										title: '已建档并保存',
@@ -982,7 +1014,7 @@ this.isAdmin = isAdminRole(this.userInfo)
 									})
 								}
 							} else if (modalRes.cancel) {
-                                                            const result = await this.doCreateFilling(tare, gross)
+                                                            const result = await this.doCreateFilling(tare, gross, net)
 								if (result.code === 0) {
 									uni.showToast({
 										title: '已保存',
@@ -1032,39 +1064,58 @@ this.isAdmin = isAdminRole(this.userInfo)
 					return
 				}
 
-                                const tare = Number(this.form.tare_fill)
-                                const gross = Number(this.form.gross_fill)
-                                if (isNaN(tare) || isNaN(gross)) {
-                                        uni.showToast({
-                                                title: '请正确填写皮重和毛重',
-                                                icon: 'none'
-                                        })
-                                        return
-                                }
-                                if (gross <= tare) {
-                                        uni.showToast({
-                                                title: '毛重要大于皮重',
-                                                icon: 'none'
-                                        })
-                                        return
-                                }
+				const normalized = this.normalizeWeights()
+				const operator = (this.form.operator || '').trim()
+				if (!normalized) {
+					uni.showToast({
+						title: '请正确填写皮重和毛重',
+						icon: 'none'
+					})
+					return
+				}
+				const { tare, gross, net } = normalized
+				if (!net || !Number.isFinite(net) || net <= 0 || gross <= tare) {
+					uni.showToast({
+						title: '请填写正确的灌装净重',
+						icon: 'none'
+					})
+					return
+				}
+				if (!operator || !this.form.operatorConfirmed) {
+					uni.showToast({
+						title: '请选择操作员（需点选下拉项）',
+						icon: 'none'
+					})
+					return
+				}
+				if (this.bottleBlocked) {
+					uni.showToast({
+						title: `该瓶当前状态：${this.bottleBlockedReason || '不可灌装'}`,
+						icon: 'none'
+					})
+					return
+				}
 
-                                const fillDate = this.form.date || this.todayStr()
+				const fillDate = this.form.date || this.todayStr()
 
-                                const net = gross - tare
-                                this.submitting = true
+				this.form.tare_fill = normalized.tare.toFixed(2)
+				this.form.gross_fill = normalized.gross.toFixed(2)
+				this.form.net_fill = normalized.net.toFixed(2)
 
-                                try {
-                                        const result = await this.callFilling('update', {
-                                                id: this.editingId,
-                                                bottle_no: bottleNo,
-                                                date: fillDate,
-                                                tare_fill: tare,
-                                                gross_fill: gross,
-                                                net_fill: net,
-                                                operator: this.form.operator || '',
-                                                remark: this.form.remark || ''
-                                        })
+				this.submitting = true
+
+		                                try {
+		                                        const result = await this.callFilling('update', {
+		                                                id: this.editingId,
+		                                                bottle_no: bottleNo,
+		                                                date: fillDate,
+		                                                tare_fill: tare,
+		                                                gross_fill: gross,
+		                                                net_fill: net,
+		                                                operator,
+							operator_id: this.form.selectedOperatorId || '',
+		                                                remark: this.form.remark || ''
+		                                        })
                                         if (result && result.code === 0) {
                                                 uni.showToast({
                                                         title: '修改已保存',
@@ -1090,16 +1141,15 @@ this.isAdmin = isAdminRole(this.userInfo)
 			},
 
 			// ---- 实际写库：创建灌装记录 ----
-                        async doCreateFilling(tare, gross) {
-                                const net = gross - tare
+                        async doCreateFilling(tare, gross, net) {
                                 const res = await this.callFilling('create', {
                                         bottle_no: this.form.bottle_no,
                                         date: this.form.date || this.todayStr(),
                                         tare_fill: tare,
                                         gross_fill: gross,
                                         net_fill: net,
-                                        operator:
-                                                this.form.operator || (this.userInfo && this.userInfo.username) || '',
+                                        operator: (this.form.operator || '').trim(),
+					operator_id: this.form.selectedOperatorId || '',
                                         remark: this.form.remark || ''
                                 })
                                 return res || {}
@@ -1137,14 +1187,136 @@ this.isAdmin = isAdminRole(this.userInfo)
                                         date: this.todayStr(),
                                         tare_fill: '',
                                         gross_fill: '',
-                                        operator: (this.userInfo && this.userInfo.real_name) || (this.userInfo && this.userInfo.username) || '',
+					net_fill: '',
+                                        operator: '',
+					selectedOperatorId: '',
+					operatorConfirmed: false,
                                         remark: ''
                                 }
+				this.netManual = false
+				this.lastEditedField = ''
+				this.bottleBlocked = false
+				this.bottleBlockedReason = ''
                                 this.bottleSuggestions = []
                                 this.bottleExists = null
                                 this.lastBottleInfo = null
                                 this.syncOperatorPicker()
                         },
+
+			onGrossInput(e) {
+				this.form.gross_fill = e.detail.value
+				this.lastEditedField = 'gross'
+				this.updateNetIfAuto()
+			},
+
+			onTareInput(e) {
+				this.form.tare_fill = e.detail.value
+				const prev = this.lastEditedField
+				this.lastEditedField = 'tare'
+				if (prev === 'net' && this.form.net_fill !== '') {
+					this.updateGrossFromNet()
+				} else {
+					this.updateNetIfAuto()
+				}
+			},
+
+			onNetInput() {
+				this.lastEditedField = 'net'
+				this.netManual = true
+				this.updateGrossFromNet()
+			},
+
+			updateNetIfAuto() {
+				const tare = Number(this.form.tare_fill)
+				const gross = Number(this.form.gross_fill)
+				const hasTare = !isNaN(tare)
+				const hasGross = !isNaN(gross)
+
+				if (this.lastEditedField === 'net') {
+					// net 已经驱动 gross 计算，避免覆盖
+					return
+				}
+
+				if (hasTare && hasGross) {
+					const net = gross - tare
+					this.form.net_fill = Number.isFinite(net) ? net.toFixed(2) : ''
+				}
+			},
+
+			updateGrossFromNet() {
+				const tare = Number(this.form.tare_fill)
+				const net = Number(this.form.net_fill)
+				if (isNaN(tare) || isNaN(net)) return
+				const gross = tare + net
+				if (Number.isFinite(gross)) {
+					this.form.gross_fill = gross.toFixed(2)
+				}
+			},
+
+			resolveNet(tare, gross) {
+				const t = Number(tare)
+				const g = Number(gross)
+				const autoNet = () => {
+					if (isNaN(t) || isNaN(g)) return null
+					return +(g - t)
+				}
+
+				if (this.netManual) {
+					if (this.form.net_fill === '') {
+						return autoNet()
+					}
+					const manual = Number(this.form.net_fill)
+					return Number.isFinite(manual) ? manual : null
+				}
+
+				return autoNet()
+			},
+
+			normalizeWeights() {
+				const tare = Number(this.form.tare_fill)
+				const gross = Number(this.form.gross_fill)
+				let net = Number(this.form.net_fill)
+				if (!Number.isFinite(tare) || !Number.isFinite(gross)) return null
+				if (!Number.isFinite(net)) {
+					net = gross - tare
+				}
+				// 以净重为主导，反算毛重
+				const finalGross = tare + net
+				const fixedTare = Number(tare.toFixed(2))
+				const fixedNet = Number(net.toFixed(2))
+				const fixedGross = Number(finalGross.toFixed(2))
+				return {
+					tare: fixedTare,
+					gross: fixedGross,
+					net: fixedNet
+				}
+			},
+
+			handleBottleStatus(doc) {
+				const status = doc && doc.status
+				if (status && status !== 'in_station') {
+					this.bottleBlocked = true
+					this.bottleBlockedReason = this.bottleStatusText(status)
+				} else {
+					this.bottleBlocked = false
+					this.bottleBlockedReason = ''
+				}
+			},
+
+			onListKeywordInput(e) {
+				this.listBottleKeyword = e.detail.value
+				this.debouncedListSearch && this.debouncedListSearch()
+			},
+
+			onSearchBottleList() {
+				this.fetchList()
+			},
+
+			clearListKeyword() {
+				if (!this.listBottleKeyword) return
+				this.listBottleKeyword = ''
+				this.fetchList()
+			},
 
                         // ---- 导出 ----
                         async exportFilling() {
@@ -1358,6 +1530,30 @@ this.isAdmin = isAdminRole(this.userInfo)
 		justify-content: space-between;
 	}
 
+	.card-actions {
+		display: flex;
+		align-items: center;
+		gap: 10rpx;
+	}
+
+	.btn-action {
+		min-width: 120rpx;
+		height: 70rpx;
+		padding: 0 18rpx;
+		border-radius: 12rpx;
+		background: #f3f4f6;
+		border: 1rpx solid #e5e7eb;
+		color: #374151;
+		font-size: 24rpx;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.btn-action:active {
+		background: #e5e7eb;
+	}
+
 	.card-header-main {
 		display: flex;
 		flex-direction: column;
@@ -1489,6 +1685,38 @@ this.isAdmin = isAdminRole(this.userInfo)
 
 	.summary-row.loading {
 		padding: 16rpx 0 4rpx;
+	}
+
+	.search-compact {
+		display: flex;
+		align-items: center;
+		min-width: 220rpx;
+		height: 70rpx;
+		padding: 0 14rpx;
+		background: #f5f7fc;
+		border: 1rpx solid #e5e7eb;
+		border-radius: 12rpx;
+		box-sizing: border-box;
+	}
+
+	.search-input {
+		flex: 1;
+		height: 100%;
+		border: none;
+		background: transparent;
+		font-size: 24rpx;
+		color: #222;
+	}
+
+	.search-input::placeholder {
+		color: #9ca3af;
+	}
+
+	.search-clear {
+		margin-left: 6rpx;
+		font-size: 32rpx;
+		color: #c0c4d4;
+		line-height: 1;
 	}
 
 	.loading-text {

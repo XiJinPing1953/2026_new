@@ -6,6 +6,7 @@ const dbCmd = db.command
 const usersCol = db.collection('crm_users')
 const bottlesCol = db.collection('crm_bottles')
 const fillingCol = db.collection('crm_filling_records')
+const deliveryCol = db.collection('crm_delivery_men')
 const logsCol = db.collection('crm_operation_logs')
 
 // 新增：进站 & 销售集合
@@ -54,6 +55,32 @@ function normalizeDateStr(tsOrStr) {
 	return `${y}-${m}-${dd}`
 }
 
+async function resolveOperator(operatorId, operatorName) {
+	if (operatorId) {
+		const res = await deliveryCol.doc(operatorId).get()
+		const doc = res.data && res.data[0]
+		if (doc) return { name: doc.name || doc.real_name || doc.phone || '', id: doc._id }
+	}
+	if (operatorName) {
+		const kw = operatorName.trim()
+		if (kw) {
+			const res = await deliveryCol
+				.where({
+					$or: [
+						{ name: kw },
+						{ real_name: kw },
+						{ phone: kw }
+					]
+				})
+				.limit(1)
+				.get()
+			const doc = res.data && res.data[0]
+			if (doc) return { name: doc.name || doc.real_name || doc.phone || '', id: doc._id }
+		}
+	}
+	return null
+}
+
 exports.main = async (event, context) => {
 	const {
 		action,
@@ -80,6 +107,7 @@ exports.main = async (event, context) => {
 			gross_fill,
 			net_fill, // 前端算好了也行，不信就后端再算一次
 			operator,
+			operator_id,
 			remark,
 			date // 可选，没传就用今天
 		} = data || {}
@@ -110,10 +138,16 @@ exports.main = async (event, context) => {
 		const dateStr = normalizeDateStr(date || now)
 
 		// 先查一次瓶子
-		let bottleRes = await bottlesCol.where({
-			number: no
-		}).limit(1).get()
-		let bottle = bottleRes.data[0] || null
+	let bottleRes = await bottlesCol.where({
+		number: no
+	}).limit(1).get()
+	let bottle = bottleRes.data[0] || null
+	if (bottle && bottle.status && bottle.status !== 'in_station') {
+		return {
+			code: 400,
+			msg: `瓶子当前状态为 ${bottle.status}，不可灌装`
+		}
+	}
 
 		// 若不存在，后台兜底：走 quickCreate 自动补瓶子
 		// 这样任何入口只要调 crm-filling.create，数据都不会残缺
@@ -143,19 +177,36 @@ exports.main = async (event, context) => {
 			}
 		}
 
+		const operatorResolved = await resolveOperator(operator_id, operator)
+		if (!operatorResolved) {
+			return {
+				code: 400,
+				msg: '操作员无效，请重新选择'
+			}
+		}
+
+		const finalNet = Number(net.toFixed(2))
+		const finalTare = Number(tare.toFixed(2))
+		const finalGross = Number((tare + finalNet).toFixed(2))
+
+		if (!(finalNet > 0) || !(finalGross > finalTare)) {
+			return { code: 400, msg: '净重需大于 0 且毛重大于皮重' }
+		}
+
 		const doc = {
 			bottle_no: no,
 			bottle_id: bottle ? bottle._id : null,
 
 			// 灌装时的称重（全部 kg）
-			tare_fill: tare, // 灌装前皮重
-			gross_fill: gross, // 灌装后毛重
-			net_fill: net, // 灌装净重（毛 - 皮）
+			tare_fill: finalTare, // 灌装前皮重
+			gross_fill: finalGross, // 灌装后毛重
+			net_fill: finalNet, // 灌装净重（毛 - 皮）
 
 			date: dateStr,
 			timestamp: now,
 
-			operator: operator || user.username || user.name || '',
+			operator: operatorResolved.name || user.username || user.name || '',
+			operator_id: operatorResolved.id || null,
 			remark: remark || '',
 
 			created_at: now,
@@ -172,15 +223,15 @@ exports.main = async (event, context) => {
 			const bottleUpdate = {
 				// 新字段：最近一次灌装（全部 kg）
 				last_fill_date: dateStr,
-				last_fill_tare: tare,
-				last_fill_gross: gross,
-				last_fill_net: net,
+				last_fill_tare: finalTare,
+				last_fill_gross: finalGross,
+				last_fill_net: finalNet,
 
 				// 兼容旧字段（如果别的页面还在用，可以继续用）
-				filling_gross_weight: gross,
-				filling_net_weight: net,
-				next_out_gross: gross,
-				next_out_net: net,
+				filling_gross_weight: finalGross,
+				filling_net_weight: finalNet,
+				next_out_gross: finalGross,
+				next_out_net: finalNet,
 
 				updated_at: now,
 				updated_by: user._id
@@ -210,10 +261,11 @@ exports.main = async (event, context) => {
 	if (action === 'list') {
 		const {
 			page = 1,
-				pageSize = 50,
-				start_date,
-				end_date,
-				bottle_no
+			pageSize = 50,
+			start_date,
+			end_date,
+			bottle_no,
+			keyword
 		} = data || {}
 
 		const where = {}
@@ -230,8 +282,9 @@ exports.main = async (event, context) => {
 			}
 		}
 
-		if (bottle_no) {
-			where.bottle_no = (bottle_no || '').trim()
+		const kw = (keyword || bottle_no || '').trim()
+		if (kw) {
+			where.bottle_no = kw
 		}
 
 		const skip = (page - 1) * pageSize
@@ -253,6 +306,90 @@ exports.main = async (event, context) => {
 			page,
 			pageSize
 		}
+	}
+
+	// =========================
+	// 3. 更新灌装记录 action: update
+	// =========================
+	if (action === 'update') {
+		const {
+			id,
+			bottle_no,
+			tare_fill,
+			gross_fill,
+			net_fill,
+			operator,
+			operator_id,
+			remark,
+			date
+		} = data || {}
+
+		if (!id) return { code: 400, msg: 'id 必填' }
+		const no = (bottle_no || '').trim()
+		if (!no) return { code: 400, msg: 'bottle_no 必填' }
+
+		const tare = toNumber(tare_fill, null)
+		const gross = toNumber(gross_fill, null)
+		let net = toNumber(net_fill, null)
+		if (tare == null || gross == null) {
+			return { code: 400, msg: 'tare_fill 和 gross_fill 必填且为数字' }
+		}
+		if (net == null) net = gross - tare
+		const netFromGross = gross - tare
+		net = net == null ? netFromGross : net
+		const finalNet = Number(net.toFixed(2))
+		const finalGross = Number((tare + finalNet).toFixed(2))
+		const finalTare = Number(tare.toFixed(2))
+
+		if (!(finalNet > 0) || !(finalGross > finalTare)) {
+			return { code: 400, msg: '净重需大于 0 且毛重大于皮重' }
+		}
+
+		const bottleRes = await bottlesCol.where({ number: no }).limit(1).get()
+		const bottle = bottleRes.data[0]
+		if (!bottle) {
+			return { code: 400, msg: '瓶子不存在，请先建档' }
+		}
+		if (bottle.status && bottle.status !== 'in_station') {
+			return { code: 400, msg: `瓶子当前状态为 ${bottle.status}，不可灌装` }
+		}
+
+		const operatorResolved = await resolveOperator(operator_id, operator)
+		if (!operatorResolved) {
+			return { code: 400, msg: '操作员无效，请重新选择' }
+		}
+
+		const now = Date.now()
+		const dateStr = normalizeDateStr(date || now)
+
+		await fillingCol.doc(id).update({
+			bottle_no: no,
+			bottle_id: bottle._id || null,
+			tare_fill: finalTare,
+			gross_fill: finalGross,
+			net_fill: finalNet,
+			date: dateStr,
+			operator: operatorResolved.name || user.username || user.name || '',
+			operator_id: operatorResolved.id || null,
+			remark: remark || '',
+			updated_at: now,
+			updated_by: user._id
+		})
+
+		await bottlesCol.doc(bottle._id).update({
+			last_fill_date: dateStr,
+			last_fill_tare: finalTare,
+			last_fill_gross: finalGross,
+			last_fill_net: finalNet,
+			filling_gross_weight: finalGross,
+			filling_net_weight: finalNet,
+			next_out_gross: finalGross,
+			next_out_net: finalNet,
+			updated_at: now,
+			updated_by: user._id
+		})
+
+		return { code: 0, msg: 'updated' }
 	}
 
 	// =========================
